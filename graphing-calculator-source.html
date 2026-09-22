@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Graphing Calculator</title>
+<style>
+  :root{
+    --bg:#f7f7f5; --panel:#ffffff; --ink:#1d1d1b; --muted:#6b6b66;
+    --line:#dcdcd6; --grid:#e6e6e0; --axis:#9a9a92; --accent:#b4531f; --err:#b3261e;
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#17171a; --panel:#202024; --ink:#ececea; --muted:#9a9a94;
+      --line:#34343a; --grid:#2a2a30; --axis:#6a6a72; --accent:#e58a4e; --err:#f2907f;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#17171a; --panel:#202024; --ink:#ececea; --muted:#9a9a94;
+    --line:#34343a; --grid:#2a2a30; --axis:#6a6a72; --accent:#e58a4e; --err:#f2907f;
+  }
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:16px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    display:flex; flex-direction:column; gap:12px; padding:16px;
+  }
+  header h1{font-size:18px;margin:0 0 2px;letter-spacing:-.01em}
+  header p{margin:0;color:var(--muted);font-size:13px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px}
+  .rows{padding:10px 10px 4px}
+  .row{display:flex;align-items:center;gap:8px;padding:4px 0}
+  .swatch{width:12px;height:12px;border-radius:50%;flex:0 0 auto}
+  input[type=text]{
+    flex:1 1 200px;min-width:0;padding:9px 10px;font-size:16px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    background:transparent;color:var(--ink);
+    border:1px solid var(--line);border-radius:8px;
+  }
+  input:focus{outline:2px solid var(--accent);outline-offset:1px}
+  .result{
+    font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;color:var(--muted);
+    flex:0 0 auto;max-width:34%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;
+  }
+  .result.err{color:var(--err)}
+  .rm{
+    flex:0 0 auto;width:28px;height:28px;padding:0;border-radius:7px;
+    border:1px solid var(--line);background:transparent;color:var(--muted);
+    font-size:15px;line-height:1;cursor:pointer;
+  }
+  .addrow{padding:8px 10px 12px}
+  button{
+    padding:9px 14px;font-size:14px;border-radius:8px;cursor:pointer;
+    border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  }
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .graphwrap{flex:1 1 auto;min-height:280px;position:relative;overflow:hidden}
+  canvas{display:block;width:100%;height:100%;border-radius:12px;touch-action:none;cursor:grab}
+  canvas.drag{cursor:grabbing}
+  .tools{position:absolute;right:8px;bottom:8px;display:flex;gap:6px}
+  .tools button{padding:6px 10px;font-size:14px;opacity:.95}
+  .hint{color:var(--muted);font-size:12px;padding:0 2px}
+  .ex{display:flex;gap:6px;flex-wrap:wrap;padding:0 2px}
+  .ex button{padding:5px 10px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
+</style>
+</head>
+<body>
+<header>
+  <h1>Graphing Calculator</h1>
+  <p>Each line below is its own expression. No variable &rarr; an answer next to it. Contains <code>x</code> &rarr; it's added to the graph in its own color.</p>
+</header>
+
+<div class="card">
+  <div class="rows" id="rows"></div>
+  <div class="addrow"><button id="addRow">+ Add line</button></div>
+</div>
+
+<div class="ex">
+  <button>12^2 + sqrt(81)</button>
+  <button>sin(pi/4)</button>
+  <button>x^3 - 4x</button>
+  <button>y = sin(x)/x</button>
+  <button>1/x</button>
+  <button>e^(-x^2)</button>
+</div>
+
+<div class="card graphwrap" id="gw">
+  <canvas id="cv"></canvas>
+  <div class="tools">
+    <button id="zin" title="Zoom in">+</button>
+    <button id="zout" title="Zoom out">&minus;</button>
+    <button id="rst" title="Reset view">Reset</button>
+  </div>
+</div>
+<p class="hint">Drag to pan, scroll or pinch to zoom. Add multiple lines to graph them together.</p>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------- tokenizer ---------- */
+var FUNCS = {
+  sin:Math.sin, cos:Math.cos, tan:Math.tan, asin:Math.asin, acos:Math.acos,
+  atan:Math.atan, sinh:Math.sinh, cosh:Math.cosh, tanh:Math.tanh,
+  sqrt:Math.sqrt, abs:Math.abs, ln:Math.log, log:function(v){return Math.log(v)/Math.LN10;},
+  exp:Math.exp, floor:Math.floor, ceil:Math.ceil, round:Math.round, sign:Math.sign
+};
+var CONSTS = { pi:Math.PI, "\u03c0":Math.PI, e:Math.E, tau:2*Math.PI };
+
+function tokenize(s){
+  var t=[], i=0;
+  s = s.replace(/\s+/g,"");
+  while(i < s.length){
+    var c = s[i];
+    if(/[0-9.]/.test(c)){
+      var j=i; while(j<s.length && /[0-9.]/.test(s[j])) j++;
+      var n = parseFloat(s.slice(i,j));
+      if(isNaN(n)) throw new Error("Bad number near \u201c"+s.slice(i,j)+"\u201d");
+      t.push({t:"num",v:n}); i=j;
+    } else if(/[a-zA-Z\u03c0]/.test(c)){
+      var k=i; while(k<s.length && /[a-zA-Z\u03c0]/.test(s[k])) k++;
+      var name = s.slice(i,k);
+      if(FUNCS[name]) t.push({t:"fn",v:name});
+      else if(name==="x" || name==="X") t.push({t:"var"});
+      else if(CONSTS[name] !== undefined) t.push({t:"num",v:CONSTS[name]});
+      else throw new Error("Unknown name \u201c"+name+"\u201d");
+      i=k;
+    } else if("+-*/^%".indexOf(c)>=0){ t.push({t:"op",v:c}); i++; }
+    else if(c==="("||c===")"){ t.push({t:c}); i++; }
+    else throw new Error("Unexpected character \u201c"+c+"\u201d");
+  }
+  /* implicit multiplication: 2x, 3(x+1), x sin(x), )( */
+  var out=[];
+  for(var a=0;a<t.length;a++){
+    if(a>0){
+      var p=out[out.length-1], q=t[a];
+      var pEnd = p.t==="num"||p.t==="var"||p.t===")";
+      var qStart = q.t==="num"||q.t==="var"||q.t==="fn"||q.t==="(";
+      if(pEnd && qStart) out.push({t:"op",v:"*"});
+    }
+    out.push(t[a]);
+  }
+  return out;
+}
+
+/* ---------- shunting-yard -> RPN ---------- */
+var PREC = {"+":1,"-":1,"*":2,"/":2,"%":2,"^":4,"u-":3};
+function toRPN(tok){
+  var out=[], st=[], prevEnd=false;
+  for(var i=0;i<tok.length;i++){
+    var k=tok[i];
+    if(k.t==="num"||k.t==="var"){ out.push(k); prevEnd=true; }
+    else if(k.t==="fn"){ st.push(k); prevEnd=false; }
+    else if(k.t==="op"){
+      var op = k.v;
+      if((op==="-"||op==="+") && !prevEnd){
+        if(op==="-") st.push({t:"op",v:"u-"});
+      } else {
+        while(st.length){
+          var top=st[st.length-1];
+          if(top.t==="fn" ||
+             (top.t==="op" && (PREC[top.v]>PREC[op] || (PREC[top.v]===PREC[op] && op!=="^")))){
+            out.push(st.pop());
+          } else break;
+        }
+        st.push(k);
+      }
+      prevEnd=false;
+    }
+    else if(k.t==="("){ st.push(k); prevEnd=false; }
+    else if(k.t===")"){
+      var found=false;
+      while(st.length){ var s2=st.pop(); if(s2.t==="("){found=true;break;} out.push(s2); }
+      if(!found) throw new Error("Unbalanced parentheses");
+      if(st.length && st[st.length-1].t==="fn") out.push(st.pop());
+      prevEnd=true;
+    }
+  }
+  while(st.length){ var s3=st.pop(); if(s3.t==="(") throw new Error("Unbalanced parentheses"); out.push(s3); }
+  if(!out.length) throw new Error("Nothing to evaluate");
+  return out;
+}
+
+function evalRPN(rpn, x){
+  var s=[];
+  for(var i=0;i<rpn.length;i++){
+    var k=rpn[i];
+    if(k.t==="num") s.push(k.v);
+    else if(k.t==="var") s.push(x);
+    else if(k.t==="fn"){ if(!s.length) throw new Error("Malformed expression"); s.push(FUNCS[k.v](s.pop())); }
+    else if(k.t==="op"){
+      if(k.v==="u-"){ if(!s.length) throw new Error("Malformed expression"); s.push(-s.pop()); continue; }
+      if(s.length<2) throw new Error("Malformed expression");
+      var b=s.pop(), a=s.pop();
+      s.push(k.v==="+"?a+b : k.v==="-"?a-b : k.v==="*"?a*b : k.v==="/"?a/b :
+             k.v==="%"?a%b : Math.pow(a,b));
+    }
+  }
+  if(s.length!==1) throw new Error("Malformed expression");
+  return s[0];
+}
+
+function parse(raw){
+  var s = String(raw).trim();
+  if(!s) throw new Error("Enter an expression");
+  /* strip a leading "y =" or "f(x) =" */
+  s = s.replace(/^\s*(y|f\s*\(\s*x\s*\))\s*=\s*/i,"");
+  if(s.indexOf("=")>=0) throw new Error("Only expressions or \u201cy = \u2026\u201d are supported");
+  var tok = tokenize(s);
+  var hasVar = tok.some(function(t){return t.t==="var";});
+  return { rpn:toRPN(tok), hasVar:hasVar, text:s };
+}
+
+function fmt(n){
+  if(!isFinite(n)) return String(n);
+  if(n!==0 && (Math.abs(n)<1e-4 || Math.abs(n)>=1e10)) return n.toExponential(6).replace(/e/,"e");
+  return String(parseFloat(n.toPrecision(12)));
+}
+
+/* ---------- multi-line state ---------- */
+var PALETTE = ["#b4531f","#1f6fb4","#1f8a4c","#8a1fb4","#b4901f","#1f9ea8","#b4275a","#5a7a1f"];
+var rows = [];      /* {id, color, text, parsed, error} */
+var nextId = 1;
+
+function newRow(text){
+  var id = nextId++;
+  var color = PALETTE[(id-1) % PALETTE.length];
+  rows.push({ id:id, color:color, text: (text===undefined?"":text), parsed:null, error:null });
+  return id;
+}
+
+/* ---------- view state ---------- */
+var cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+var view={cx:0, cy:0, scale:40}; /* pixels per unit */
+var W=0, H=0;
+
+function resize(){
+  var r=cv.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+  W=Math.max(1,Math.round(r.width)); H=Math.max(1,Math.round(r.height));
+  cv.width=W*dpr; cv.height=H*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  draw();
+}
+function sx(x){ return W/2 + (x-view.cx)*view.scale; }
+function sy(y){ return H/2 - (y-view.cy)*view.scale; }
+function ux(px){ return view.cx + (px-W/2)/view.scale; }
+function css(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+function niceStep(minPx){
+  var raw = minPx/view.scale, p = Math.pow(10,Math.floor(Math.log(raw)/Math.LN10)), r=raw/p;
+  return (r<=1?1:r<=2?2:r<=5?5:10)*p;
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  var step=niceStep(70), gridC=css("--grid"), axisC=css("--axis"), mutedC=css("--muted");
+  var x0=ux(0), x1=ux(W), yTop=view.cy+(H/2)/view.scale, yBot=view.cy-(H/2)/view.scale;
+
+  ctx.lineWidth=1; ctx.strokeStyle=gridC; ctx.beginPath();
+  for(var gx=Math.ceil(x0/step)*step; gx<=x1; gx+=step){ var px=Math.round(sx(gx))+.5; ctx.moveTo(px,0); ctx.lineTo(px,H); }
+  for(var gy=Math.ceil(yBot/step)*step; gy<=yTop; gy+=step){ var py=Math.round(sy(gy))+.5; ctx.moveTo(0,py); ctx.lineTo(W,py); }
+  ctx.stroke();
+
+  ctx.strokeStyle=axisC; ctx.lineWidth=1.5; ctx.beginPath();
+  var ax=Math.round(sx(0))+.5, ay=Math.round(sy(0))+.5;
+  if(ax>=0&&ax<=W){ ctx.moveTo(ax,0); ctx.lineTo(ax,H); }
+  if(ay>=0&&ay<=H){ ctx.moveTo(0,ay); ctx.lineTo(W,ay); }
+  ctx.stroke();
+
+  ctx.fillStyle=mutedC; ctx.font="11px ui-monospace,Menlo,monospace";
+  ctx.textAlign="center"; ctx.textBaseline="top";
+  var lblY=Math.min(Math.max(ay+4,4),H-16);
+  for(var lx=Math.ceil(x0/step)*step; lx<=x1; lx+=step){
+    if(Math.abs(lx)<step/2) continue;
+    ctx.fillText(fmt(+lx.toFixed(10)), sx(lx), lblY);
+  }
+  ctx.textAlign="right"; ctx.textBaseline="middle";
+  var lblX=Math.min(Math.max(ax-6,26),W-4);
+  for(var ly=Math.ceil(yBot/step)*step; ly<=yTop; ly+=step){
+    if(Math.abs(ly)<step/2) continue;
+    ctx.fillText(fmt(+ly.toFixed(10)), lblX, sy(ly));
+  }
+
+  var jump=H*1.5;
+  for(var ri=0; ri<rows.length; ri++){
+    var row=rows[ri];
+    if(!row.parsed || !row.parsed.hasVar) continue;
+    var rpn = row.parsed.rpn;
+    ctx.strokeStyle=row.color; ctx.lineWidth=2.25;
+    ctx.lineJoin="round"; ctx.lineCap="round"; ctx.beginPath();
+    var pen=false, lastY=null;
+    for(var px2=0; px2<=W; px2+=0.5){
+      var y;
+      try{ y=evalRPN(rpn, ux(px2)); }catch(e){ y=NaN; }
+      if(typeof y!=="number" || !isFinite(y)){ pen=false; lastY=null; continue; }
+      var py2=sy(y);
+      if(py2 < -1e6) py2=-1e6; if(py2 > 1e6) py2=1e6;
+      if(!pen || (lastY!==null && Math.abs(py2-lastY)>jump)){ ctx.moveTo(px2,py2); pen=true; }
+      else ctx.lineTo(px2,py2);
+      lastY=py2;
+    }
+    ctx.stroke();
+  }
+}
+
+/* ---------- row UI ---------- */
+var rowsEl = document.getElementById("rows");
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g,function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });
+}
+
+function renderRows(){
+  rowsEl.innerHTML = "";
+  rows.forEach(function(row){
+    var wrap = document.createElement("div");
+    wrap.className = "row";
+    wrap.dataset.id = row.id;
+
+    var sw = document.createElement("span");
+    sw.className = "swatch";
+    sw.style.background = row.color;
+
+    var inp = document.createElement("input");
+    inp.type = "text"; inp.autocomplete="off"; inp.autocapitalize="off"; inp.spellcheck=false;
+    inp.placeholder = "e.g. 3*(4+5)/2   or   y = sin(x)/x";
+    inp.value = row.text;
+    inp.addEventListener("input", function(){ row.text = inp.value; evalRow(row); updateResult(row); draw(); });
+    inp.addEventListener("keydown", function(e){ if(e.key==="Enter"){ evalRow(row); updateResult(row); draw(); } });
+
+    var res = document.createElement("span");
+    res.className = "result";
+
+    var rm = document.createElement("button");
+    rm.className = "rm"; rm.type="button"; rm.title="Remove line"; rm.textContent = "\u2715";
+    rm.addEventListener("click", function(){
+      rows = rows.filter(function(r){ return r.id !== row.id; });
+      renderRows(); draw();
+    });
+
+    wrap.appendChild(sw); wrap.appendChild(inp); wrap.appendChild(res); wrap.appendChild(rm);
+    rowsEl.appendChild(wrap);
+    row._resultEl = res;
+    evalRow(row);
+    updateResult(row);
+  });
+}
+
+function evalRow(row){
+  if(!row.text.trim()){ row.parsed=null; row.error=null; return; }
+  try{ row.parsed = parse(row.text); row.error = null; }
+  catch(err){ row.parsed = null; row.error = err.message; }
+}
+
+function updateResult(row){
+  var el = row._resultEl;
+  if(!el) return;
+  if(!row.text.trim()){ el.textContent=""; el.classList.remove("err"); return; }
+  if(row.error){ el.textContent = row.error; el.classList.add("err"); return; }
+  el.classList.remove("err");
+  if(row.parsed.hasVar){ el.textContent = "graphed"; }
+  else {
+    try{ el.textContent = fmt(evalRPN(row.parsed.rpn,0)); }
+    catch(e2){ el.textContent = e2.message; el.classList.add("err"); }
+  }
+}
+
+function addRow(text){
+  var id = newRow(text);
+  var row = rows[rows.length-1];
+  renderRows();
+  draw();
+  return row;
+}
+
+document.getElementById("addRow").addEventListener("click", function(){ addRow(""); });
+Array.prototype.forEach.call(document.querySelectorAll(".ex button"),function(b){
+  b.addEventListener("click",function(){ addRow(b.textContent); });
+});
+
+/* ---------- zoom / pan ---------- */
+function zoom(f,px,py){
+  var bx=(px===undefined)?W/2:px, by=(py===undefined)?H/2:py;
+  var wx=ux(bx), wy=view.cy-(by-H/2)/view.scale;
+  view.scale=Math.min(1e7,Math.max(1e-6,view.scale*f));
+  view.cx = wx-(bx-W/2)/view.scale;
+  view.cy = wy+(by-H/2)/view.scale;
+  draw();
+}
+document.getElementById("zin").addEventListener("click",function(){zoom(1.4);});
+document.getElementById("zout").addEventListener("click",function(){zoom(1/1.4);});
+document.getElementById("rst").addEventListener("click",function(){view={cx:0,cy:0,scale:40};draw();});
+
+cv.addEventListener("wheel",function(e){
+  e.preventDefault();
+  var r=cv.getBoundingClientRect();
+  zoom(e.deltaY<0?1.12:1/1.12, e.clientX-r.left, e.clientY-r.top);
+},{passive:false});
+
+var pts={}, lastDist=0;
+cv.addEventListener("pointerdown",function(e){
+  cv.setPointerCapture(e.pointerId); cv.classList.add("drag");
+  pts[e.pointerId]={x:e.clientX,y:e.clientY};
+});
+cv.addEventListener("pointermove",function(e){
+  if(!pts[e.pointerId]) return;
+  var ids=Object.keys(pts);
+  if(ids.length===1){
+    var p=pts[e.pointerId];
+    view.cx -= (e.clientX-p.x)/view.scale;
+    view.cy += (e.clientY-p.y)/view.scale;
+    pts[e.pointerId]={x:e.clientX,y:e.clientY};
+    draw();
+  } else if(ids.length===2){
+    pts[e.pointerId]={x:e.clientX,y:e.clientY};
+    var a=pts[ids[0]], b=pts[ids[1]];
+    var d=Math.hypot(a.x-b.x,a.y-b.y), r=cv.getBoundingClientRect();
+    if(lastDist) zoom(d/lastDist,(a.x+b.x)/2-r.left,(a.y+b.y)/2-r.top);
+    lastDist=d;
+  }
+});
+function up(e){ delete pts[e.pointerId]; lastDist=0; cv.classList.remove("drag"); }
+cv.addEventListener("pointerup",up);
+cv.addEventListener("pointercancel",up);
+
+window.addEventListener("resize",resize);
+if(window.ResizeObserver) new ResizeObserver(resize).observe(document.getElementById("gw"));
+
+/* ---------- init ---------- */
+addRow("y = x^2 - 3");
+addRow("y = sin(x)");
+resize();
+})();
+</script>
+</body>
+</html>
