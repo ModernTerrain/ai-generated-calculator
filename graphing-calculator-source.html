@@ -33,8 +33,32 @@
   header p{margin:0;color:var(--muted);font-size:13px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px}
   .rows{padding:10px 10px 4px}
-  .row{display:flex;align-items:center;gap:8px;padding:4px 0}
-  .swatch{width:12px;height:12px;border-radius:50%;flex:0 0 auto}
+  .row{display:flex;align-items:center;gap:8px;padding:4px 0;position:relative}
+  .swatch{
+    width:22px;height:22px;padding:0;border-radius:50%;flex:0 0 auto;cursor:pointer;
+    border:2px solid var(--panel);box-shadow:0 0 0 1px var(--line);
+  }
+  .swatch:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .palette{
+    position:absolute;left:0;top:100%;z-index:30;margin-top:4px;
+    display:grid;grid-template-columns:repeat(5,30px);gap:8px;padding:10px;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    box-shadow:0 6px 20px rgba(0,0,0,.2);
+  }
+  .chip{
+    width:30px;height:30px;padding:0;border-radius:50%;cursor:pointer;
+    border:2px solid transparent;box-shadow:inset 0 0 0 2px var(--panel);
+  }
+  .chip.sel{border-color:var(--ink)}
+  .eye{
+    flex:0 0 auto;width:28px;height:28px;padding:0;border-radius:7px;
+    border:1px solid var(--line);background:transparent;color:var(--ink);
+    display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
+  }
+  .eye svg{width:16px;height:16px;display:block}
+  .row.off .eye{color:var(--muted)}
+  .row.off .swatch{opacity:.3}
+  .row.off input[type=text]{opacity:.55;text-decoration:line-through;text-decoration-color:var(--muted)}
   input[type=text]{
     flex:1 1 200px;min-width:0;padding:9px 10px;font-size:16px;
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -96,7 +120,7 @@
     <button id="rst" title="Reset view">Reset</button>
   </div>
 </div>
-<p class="hint">Drag to pan, scroll or pinch to zoom. Add multiple lines to graph them together.</p>
+<p class="hint">Drag to pan, scroll or pinch to zoom. Add multiple lines to graph them together. Click a line's colored dot to change its color.</p>
 
 <script>
 (function(){
@@ -222,14 +246,18 @@ function fmt(n){
 }
 
 /* ---------- multi-line state ---------- */
-var PALETTE = ["#b4531f","#1f6fb4","#1f8a4c","#8a1fb4","#b4901f","#1f9ea8","#b4275a","#5a7a1f"];
+var PALETTE = ["#b4531f","#1f6fb4","#1f8a4c","#8a1fb4","#b4901f",
+               "#1f9ea8","#b4275a","#5a7a1f","#d32f2f","#6b6b66"];
+var COLOR_NAMES = {"#b4531f":"Orange","#1f6fb4":"Blue","#1f8a4c":"Green","#8a1fb4":"Purple",
+  "#b4901f":"Gold","#1f9ea8":"Teal","#b4275a":"Magenta","#5a7a1f":"Olive",
+  "#d32f2f":"Red","#6b6b66":"Gray"};
 var rows = [];      /* {id, color, text, parsed, error} */
 var nextId = 1;
 
 function newRow(text){
   var id = nextId++;
   var color = PALETTE[(id-1) % PALETTE.length];
-  rows.push({ id:id, color:color, text: (text===undefined?"":text), parsed:null, error:null });
+  rows.push({ id:id, color:color, text: (text===undefined?"":text), parsed:null, error:null, hidden:false });
   return id;
 }
 
@@ -288,7 +316,7 @@ function draw(){
   var jump=H*1.5;
   for(var ri=0; ri<rows.length; ri++){
     var row=rows[ri];
-    if(!row.parsed || !row.parsed.hasVar) continue;
+    if(row.hidden || !row.parsed || !row.parsed.hasVar) continue;
     var rpn = row.parsed.rpn;
     ctx.strokeStyle=row.color; ctx.lineWidth=2.25;
     ctx.lineJoin="round"; ctx.lineCap="round"; ctx.beginPath();
@@ -316,16 +344,62 @@ function escapeHtml(s){
   });
 }
 
+var EYE_ON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+var EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.9 10.9 0 0 1 12 19C5 19 1 12 1 12a18.5 18.5 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12A3 3 0 1 1 9.88 9.88"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+function closePalettes(){
+  Array.prototype.forEach.call(document.querySelectorAll(".palette"),function(p){
+    p.parentNode.removeChild(p);
+  });
+}
+
+function openPalette(row, wrap, sw){
+  var pal = document.createElement("div");
+  pal.className = "palette";
+  pal.setAttribute("role","listbox");
+  PALETTE.forEach(function(c){
+    var chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip" + (c === row.color ? " sel" : "");
+    chip.style.background = c;
+    chip.title = COLOR_NAMES[c] || c;
+    chip.setAttribute("aria-label", COLOR_NAMES[c] || c);
+    chip.addEventListener("click", function(e){
+      e.stopPropagation();
+      row.color = c;
+      sw.style.background = c;
+      closePalettes();
+      draw();
+    });
+    pal.appendChild(chip);
+  });
+  pal.addEventListener("click", function(e){ e.stopPropagation(); });
+  wrap.appendChild(pal);
+}
+
+document.addEventListener("click", closePalettes);
+document.addEventListener("keydown", function(e){ if(e.key==="Escape") closePalettes(); });
+
 function renderRows(){
+  closePalettes();
   rowsEl.innerHTML = "";
   rows.forEach(function(row){
     var wrap = document.createElement("div");
     wrap.className = "row";
     wrap.dataset.id = row.id;
 
-    var sw = document.createElement("span");
+    var sw = document.createElement("button");
+    sw.type = "button";
     sw.className = "swatch";
+    sw.title = "Change color";
+    sw.setAttribute("aria-label","Change line color");
     sw.style.background = row.color;
+    sw.addEventListener("click", function(e){
+      e.stopPropagation();
+      var wasOpen = !!wrap.querySelector(".palette");
+      closePalettes();
+      if(!wasOpen) openPalette(row, wrap, sw);
+    });
 
     var inp = document.createElement("input");
     inp.type = "text"; inp.autocomplete="off"; inp.autocapitalize="off"; inp.spellcheck=false;
@@ -344,7 +418,24 @@ function renderRows(){
       renderRows(); draw();
     });
 
-    wrap.appendChild(sw); wrap.appendChild(inp); wrap.appendChild(res); wrap.appendChild(rm);
+    var eye = document.createElement("button");
+    eye.className = "eye"; eye.type = "button";
+    function applyHidden(){
+      wrap.classList.toggle("off", !!row.hidden);
+      eye.innerHTML = row.hidden ? EYE_OFF : EYE_ON;
+      eye.title = row.hidden ? "Show line" : "Hide line";
+      eye.setAttribute("aria-label", eye.title);
+      eye.setAttribute("aria-pressed", row.hidden ? "true" : "false");
+    }
+    eye.addEventListener("click", function(){
+      row.hidden = !row.hidden;
+      applyHidden();
+      updateResult(row);
+      draw();
+    });
+    applyHidden();
+
+    wrap.appendChild(sw); wrap.appendChild(inp); wrap.appendChild(res); wrap.appendChild(eye); wrap.appendChild(rm);
     rowsEl.appendChild(wrap);
     row._resultEl = res;
     evalRow(row);
@@ -364,7 +455,7 @@ function updateResult(row){
   if(!row.text.trim()){ el.textContent=""; el.classList.remove("err"); return; }
   if(row.error){ el.textContent = row.error; el.classList.add("err"); return; }
   el.classList.remove("err");
-  if(row.parsed.hasVar){ el.textContent = "graphed"; }
+  if(row.parsed.hasVar){ el.textContent = row.hidden ? "hidden" : "graphed"; }
   else {
     try{ el.textContent = fmt(evalRPN(row.parsed.rpn,0)); }
     catch(e2){ el.textContent = e2.message; el.classList.add("err"); }
