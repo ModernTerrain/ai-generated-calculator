@@ -59,6 +59,16 @@
   .row.off .eye{color:var(--muted)}
   .row.off .swatch{opacity:.3}
   .row.off input[type=text]{opacity:.55;text-decoration:line-through;text-decoration-color:var(--muted)}
+  .stylesel{
+    flex:0 0 auto;height:28px;padding:0 6px;font-size:13px;border-radius:7px;
+    border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer;
+  }
+  .stylesel option{background:var(--panel);color:var(--ink)}
+  @media (max-width:560px){
+    .row{flex-wrap:wrap}
+    .row input[type=text]{order:10;flex:1 1 100%}
+    .row .result{flex:1 1 auto;max-width:none}
+  }
   input[type=text]{
     flex:1 1 200px;min-width:0;padding:9px 10px;font-size:16px;
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -120,7 +130,7 @@
     <button id="rst" title="Reset view">Reset</button>
   </div>
 </div>
-<p class="hint">Drag to pan, scroll or pinch to zoom. Add multiple lines to graph them together. Click a line's colored dot to change its color.</p>
+<p class="hint">Drag to pan, scroll or pinch to zoom. Add multiple lines to graph them together. Click a line's colored dot to change its color, or use its style menu for dashed and dotted lines.</p>
 
 <script>
 (function(){
@@ -251,13 +261,26 @@ var PALETTE = ["#b4531f","#1f6fb4","#1f8a4c","#8a1fb4","#b4901f",
 var COLOR_NAMES = {"#b4531f":"Orange","#1f6fb4":"Blue","#1f8a4c":"Green","#8a1fb4":"Purple",
   "#b4901f":"Gold","#1f9ea8":"Teal","#b4275a":"Magenta","#5a7a1f":"Olive",
   "#d32f2f":"Red","#6b6b66":"Gray"};
+
+/* line styles: label + canvas dash pattern (lines use round caps, so dots are 0.1 long) */
+var LINE_STYLES = [
+  {id:"solid",   label:"Solid",     dash:[]},
+  {id:"dashed",  label:"Dashed",    dash:[8,8]},
+  {id:"long",    label:"Long dash", dash:[16,10]},
+  {id:"dotted",  label:"Dotted",    dash:[0.1,7]},
+  {id:"dashdot", label:"Dash-dot",  dash:[10,7,0.1,7]}
+];
+function dashFor(id){
+  for(var i=0;i<LINE_STYLES.length;i++){ if(LINE_STYLES[i].id===id) return LINE_STYLES[i].dash; }
+  return [];
+}
 var rows = [];      /* {id, color, text, parsed, error} */
 var nextId = 1;
 
 function newRow(text){
   var id = nextId++;
   var color = PALETTE[(id-1) % PALETTE.length];
-  rows.push({ id:id, color:color, text: (text===undefined?"":text), parsed:null, error:null, hidden:false });
+  rows.push({ id:id, color:color, text: (text===undefined?"":text), parsed:null, error:null, hidden:false, dash:"solid" });
   return id;
 }
 
@@ -285,6 +308,7 @@ function niceStep(minPx){
 
 function draw(){
   ctx.clearRect(0,0,W,H);
+  ctx.setLineDash([]);
   var step=niceStep(70), gridC=css("--grid"), axisC=css("--axis"), mutedC=css("--muted");
   var x0=ux(0), x1=ux(W), yTop=view.cy+(H/2)/view.scale, yBot=view.cy-(H/2)/view.scale;
 
@@ -319,6 +343,7 @@ function draw(){
     if(row.hidden || !row.parsed || !row.parsed.hasVar) continue;
     var rpn = row.parsed.rpn;
     ctx.strokeStyle=row.color; ctx.lineWidth=2.25;
+    ctx.setLineDash(dashFor(row.dash));
     ctx.lineJoin="round"; ctx.lineCap="round"; ctx.beginPath();
     var pen=false, lastY=null;
     for(var px2=0; px2<=W; px2+=0.5){
@@ -418,6 +443,18 @@ function renderRows(){
       renderRows(); draw();
     });
 
+    var sel = document.createElement("select");
+    sel.className = "stylesel";
+    sel.title = "Line style";
+    sel.setAttribute("aria-label","Line style");
+    LINE_STYLES.forEach(function(s){
+      var o = document.createElement("option");
+      o.value = s.id; o.textContent = s.label;
+      if(s.id === row.dash) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener("change", function(){ row.dash = sel.value; draw(); });
+
     var eye = document.createElement("button");
     eye.className = "eye"; eye.type = "button";
     function applyHidden(){
@@ -435,7 +472,7 @@ function renderRows(){
     });
     applyHidden();
 
-    wrap.appendChild(sw); wrap.appendChild(inp); wrap.appendChild(res); wrap.appendChild(eye); wrap.appendChild(rm);
+    wrap.appendChild(sw); wrap.appendChild(inp); wrap.appendChild(sel); wrap.appendChild(res); wrap.appendChild(eye); wrap.appendChild(rm);
     rowsEl.appendChild(wrap);
     row._resultEl = res;
     evalRow(row);
