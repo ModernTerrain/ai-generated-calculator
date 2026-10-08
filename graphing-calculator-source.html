@@ -33,8 +33,23 @@
   header p{margin:0;color:var(--muted);font-size:13px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px}
   .rows{padding:10px 10px 4px}
-  .row{display:flex;align-items:center;gap:8px;padding:4px 0}
-  .swatch{width:12px;height:12px;border-radius:50%;flex:0 0 auto}
+  .row{display:flex;align-items:center;gap:8px;padding:4px 0;position:relative}
+  .swatch{
+    width:22px;height:22px;padding:0;border-radius:50%;flex:0 0 auto;cursor:pointer;
+    border:2px solid var(--panel);box-shadow:0 0 0 1px var(--line);
+  }
+  .swatch:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .palette{
+    position:absolute;left:0;top:100%;z-index:30;margin-top:4px;
+    display:grid;grid-template-columns:repeat(5,30px);gap:8px;padding:10px;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    box-shadow:0 6px 20px rgba(0,0,0,.2);
+  }
+  .chip{
+    width:30px;height:30px;padding:0;border-radius:50%;cursor:pointer;
+    border:2px solid transparent;box-shadow:inset 0 0 0 2px var(--panel);
+  }
+  .chip.sel{border-color:var(--ink)}
   input[type=text]{
     flex:1 1 200px;min-width:0;padding:9px 10px;font-size:16px;
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -96,7 +111,7 @@
     <button id="rst" title="Reset view">Reset</button>
   </div>
 </div>
-<p class="hint">Drag to pan, scroll or pinch to zoom. Add multiple lines to graph them together.</p>
+<p class="hint">Drag to pan, scroll or pinch to zoom. Add multiple lines to graph them together. Click a line's colored dot to change its color.</p>
 
 <script>
 (function(){
@@ -222,7 +237,11 @@ function fmt(n){
 }
 
 /* ---------- multi-line state ---------- */
-var PALETTE = ["#b4531f","#1f6fb4","#1f8a4c","#8a1fb4","#b4901f","#1f9ea8","#b4275a","#5a7a1f"];
+var PALETTE = ["#b4531f","#1f6fb4","#1f8a4c","#8a1fb4","#b4901f",
+               "#1f9ea8","#b4275a","#5a7a1f","#d32f2f","#6b6b66"];
+var COLOR_NAMES = {"#b4531f":"Orange","#1f6fb4":"Blue","#1f8a4c":"Green","#8a1fb4":"Purple",
+  "#b4901f":"Gold","#1f9ea8":"Teal","#b4275a":"Magenta","#5a7a1f":"Olive",
+  "#d32f2f":"Red","#6b6b66":"Gray"};
 var rows = [];      /* {id, color, text, parsed, error} */
 var nextId = 1;
 
@@ -316,16 +335,59 @@ function escapeHtml(s){
   });
 }
 
+function closePalettes(){
+  Array.prototype.forEach.call(document.querySelectorAll(".palette"),function(p){
+    p.parentNode.removeChild(p);
+  });
+}
+
+function openPalette(row, wrap, sw){
+  var pal = document.createElement("div");
+  pal.className = "palette";
+  pal.setAttribute("role","listbox");
+  PALETTE.forEach(function(c){
+    var chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip" + (c === row.color ? " sel" : "");
+    chip.style.background = c;
+    chip.title = COLOR_NAMES[c] || c;
+    chip.setAttribute("aria-label", COLOR_NAMES[c] || c);
+    chip.addEventListener("click", function(e){
+      e.stopPropagation();
+      row.color = c;
+      sw.style.background = c;
+      closePalettes();
+      draw();
+    });
+    pal.appendChild(chip);
+  });
+  pal.addEventListener("click", function(e){ e.stopPropagation(); });
+  wrap.appendChild(pal);
+}
+
+document.addEventListener("click", closePalettes);
+document.addEventListener("keydown", function(e){ if(e.key==="Escape") closePalettes(); });
+
 function renderRows(){
+  closePalettes();
   rowsEl.innerHTML = "";
   rows.forEach(function(row){
     var wrap = document.createElement("div");
     wrap.className = "row";
     wrap.dataset.id = row.id;
 
-    var sw = document.createElement("span");
+    var sw = document.createElement("button");
+    sw.type = "button";
     sw.className = "swatch";
+    sw.title = "Change color";
+    sw.setAttribute("aria-label","Change line color");
     sw.style.background = row.color;
+    sw.addEventListener("click", function(e){
+      e.stopPropagation();
+      var wasOpen = !!wrap.querySelector(".palette");
+      closePalettes();
+      if(!wasOpen) openPalette(row, wrap, sw);
+    });
 
     var inp = document.createElement("input");
     inp.type = "text"; inp.autocomplete="off"; inp.autocapitalize="off"; inp.spellcheck=false;
