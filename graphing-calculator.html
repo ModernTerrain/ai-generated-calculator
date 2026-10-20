@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Graphing Calculator</title>
+<title>Graphing Calculator (BUGGED COPY)</title>
 <style>
   :root{
     --bg:#f7f7f5; --panel:#ffffff; --ink:#1d1d1b; --muted:#6b6b66;
@@ -197,7 +197,7 @@ function toRPN(tok){
         while(st.length){
           var top=st[st.length-1];
           if(top.t==="fn" ||
-             (top.t==="op" && (PREC[top.v]>PREC[op] || (PREC[top.v]===PREC[op] && op!=="^")))){
+             (top.t==="op" && (PREC[top.v]>PREC[op] || (PREC[top.v]===PREC[op])))){
             out.push(st.pop());
           } else break;
         }
