@@ -1,0 +1,32 @@
+
+name: Run tests on static content
+
+on:
+  # Runs on pushes targeting the default branch
+  push:
+    branches: ["main"]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  test-without-build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Execute tests
+        run: node --test --experimental-test-coverage --test-coverage-exclude=graphing-calculator.test.js --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 graphing-calculator.test.js
