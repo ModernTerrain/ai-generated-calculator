@@ -22,14 +22,5 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-      
-      - name: Install dependencies
-        run: npm ci
-
       - name: Execute tests
         run: node --test --experimental-test-coverage --test-coverage-exclude=graphing-calculator.test.js --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 graphing-calculator.test.js
